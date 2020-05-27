@@ -87,8 +87,9 @@ enum {
 
 /* IC mask revision */
 enum {
-	FAN53555_CHIP_REV_00 = 0x3,
+	FAN53555_CHIP_REV_00 = 0x0,
 	FAN53555_CHIP_REV_13 = 0xf,
+	FAN53555_CHIP_REV_23 = 0xc,
 };
 
 enum {
@@ -174,8 +175,14 @@ static int fan53555_set_enable(struct regulator_dev *rdev)
 	struct fan53555_device_info *di = rdev_get_drvdata(rdev);
 
 	if (di->vsel_gpio) {
-		gpiod_set_raw_value(di->vsel_gpio, !di->sleep_vsel_id);
-		return 0;
+		/* For FAN53200UC44X configure */
+		if (di->chip_id == 0 && di->chip_rev == 0) {
+			gpiod_set_raw_value(di->vsel_gpio, di->sleep_vsel_id);
+			return 0;
+		} else {
+			gpiod_set_raw_value(di->vsel_gpio, !di->sleep_vsel_id);
+			return 0;
+		}
 	}
 
 	return regmap_update_bits(di->regmap, di->vol_reg,
@@ -187,8 +194,14 @@ static int fan53555_set_disable(struct regulator_dev *rdev)
 	struct fan53555_device_info *di = rdev_get_drvdata(rdev);
 
 	if (di->vsel_gpio) {
-		gpiod_set_raw_value(di->vsel_gpio, di->sleep_vsel_id);
-		return 0;
+		/* For FAN53200UC44X configure */
+		if (di->chip_id == 0 && di->chip_rev == 0) {
+			gpiod_set_raw_value(di->vsel_gpio, !di->sleep_vsel_id);
+			return 0;
+		} else {
+			gpiod_set_raw_value(di->vsel_gpio, di->sleep_vsel_id);
+			return 0;
+		}
 	}
 
 	return regmap_update_bits(di->regmap, di->vol_reg,
@@ -202,10 +215,28 @@ static int fan53555_is_enabled(struct regulator_dev *rdev)
 	int ret = 0;
 
 	if (di->vsel_gpio) {
-		if (di->sleep_vsel_id)
-			return !gpiod_get_raw_value(di->vsel_gpio);
-		else
-			return gpiod_get_raw_value(di->vsel_gpio);
+		/* For FAN53200UC44X configure */
+		if (di->chip_id == 0 && di->chip_rev == 0) {
+			if (!di->sleep_vsel_id) {
+				// FAN53200UC44X set VSEL1 to 0.8V
+				ret = regulator_map_voltage_linear(rdev, 800000, 800000);
+				if (ret < 0)
+					pr_info("%s regulator_map_voltage_linear fail\n", __func__);
+
+				ret = regmap_update_bits(di->regmap, di->vol_reg,
+					 di->vol_mask, ret);
+				if (ret < 0)
+					pr_info("%s regmap_update_bits fail\n", __func__);
+
+				return !gpiod_get_raw_value(di->vsel_gpio);
+			} else
+				return gpiod_get_raw_value(di->vsel_gpio);
+		} else {
+			if (di->sleep_vsel_id)
+				return !gpiod_get_raw_value(di->vsel_gpio);
+			else
+				return gpiod_get_raw_value(di->vsel_gpio);
+		}
 	}
 
 	ret = regmap_read(di->regmap, di->vol_reg, &val);
@@ -330,11 +361,16 @@ static int fan53555_voltages_setup_fairchild(struct fan53555_device_info *di)
 		switch (di->chip_rev) {
 		case FAN53555_CHIP_REV_00:
 			di->vsel_min = 600000;
-			di->vsel_step = 10000;
+			di->vsel_step = 12500;
 			break;
 		case FAN53555_CHIP_REV_13:
 			di->vsel_min = 800000;
 			di->vsel_step = 10000;
+			break;
+		case FAN53555_CHIP_REV_23:
+			dev_info(di->dev, "setup fairchild REV_23\n");
+			di->vsel_min = 600000;
+			di->vsel_step = 12500;
 			break;
 		default:
 			dev_err(di->dev,
@@ -425,6 +461,8 @@ static int fan53555_voltages_setup_tcs(struct fan53555_device_info *di)
  * VOUT = 0.60V + NSELx * 10mV, from 0.60 to 1.23V.
  * For 04 option:
  * VOUT = 0.603V + NSELx * 12.826mV, from 0.603 to 1.411V.
+ * For 23 option:
+ * VOUT = 0.60V + NSELx * 12.5mV,  from 0.6 to 1.3875 V in 12.5 mV steps.
  * */
 static int fan53555_device_setup(struct fan53555_device_info *di,
 				struct fan53555_platform_data *pdata)
@@ -520,6 +558,7 @@ static struct fan53555_platform_data *fan53555_parse_dt(struct device *dev,
 	pdata->vsel_gpio =
 		devm_gpiod_get_index_optional(dev, "vsel", 0,
 					      flag);
+
 	if (IS_ERR(pdata->vsel_gpio)) {
 		ret = PTR_ERR(pdata->vsel_gpio);
 		dev_err(dev, "failed to get vesl gpio (%d)\n", ret);
@@ -555,6 +594,8 @@ static int fan53555_regulator_probe(struct i2c_client *client,
 	struct regulator_config config = { };
 	unsigned int val;
 	int ret;
+
+	dev_info(&client->dev, "%s +++\n", __func__);
 
 	di = devm_kzalloc(&client->dev, sizeof(struct fan53555_device_info),
 					GFP_KERNEL);
@@ -605,6 +646,9 @@ static int fan53555_regulator_probe(struct i2c_client *client,
 	}
 	di->dev = &client->dev;
 	i2c_set_clientdata(client, di);
+
+	dev_info(&client->dev, "%s: addr = 0x%02x\n", __func__, client->addr);
+
 	/* Get chip ID */
 	ret = regmap_read(di->regmap, FAN53555_ID1, &val);
 	if (ret < 0) {
@@ -621,6 +665,13 @@ static int fan53555_regulator_probe(struct i2c_client *client,
 	di->chip_rev = val & DIE_REV;
 	dev_info(&client->dev, "FAN53555 Option[%d] Rev[%d] Detected!\n",
 				di->chip_id, di->chip_rev);
+
+	/* For FAN53200UC44X configure */
+	if (di->chip_id == 0 && di->chip_rev == 0) {
+		pdata->sleep_vsel_id = !pdata->sleep_vsel_id;
+		di->sleep_vsel_id = pdata->sleep_vsel_id;
+	}
+
 	/* Device init */
 	ret = fan53555_device_setup(di, pdata);
 	if (ret < 0) {
@@ -637,8 +688,25 @@ static int fan53555_regulator_probe(struct i2c_client *client,
 	ret = fan53555_regulator_register(di, &config);
 	if (ret < 0)
 		dev_err(&client->dev, "Failed to register regulator!\n");
-	return ret;
 
+	// FAN53200UC44X set VSEL1 to 0.8V
+	if (di->chip_id == 0 && di->chip_rev == 0) {
+		ret = regulator_map_voltage_linear(di->rdev, 800000, 800000);
+		if (ret < 0) {
+			pr_info("%s regulator_map_voltage_linear fail\n", __func__);
+			return ret;
+		}
+
+		ret = regmap_update_bits(di->regmap, di->vol_reg,
+			di->vol_mask, ret);
+		if (ret < 0) {
+			pr_info("%s regmap_update_bits fail\n", __func__);
+			return ret;
+		}
+	}
+
+	dev_info(&client->dev, "%s ---\n", __func__);
+	return ret;
 }
 
 static const struct i2c_device_id fan53555_id[] = {

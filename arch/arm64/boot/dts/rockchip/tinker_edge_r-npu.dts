@@ -49,6 +49,10 @@
 		regulator-boot-on;
 		regulator-min-microvolt = <850000>;
 		regulator-max-microvolt = <850000>;
+
+		regulator-state-mem {
+			regulator-off-in-suspend;
+		};
 	};
 
 	vdd_log: vdd-log {
@@ -91,39 +95,17 @@
 &i2c1 {
 	status = "okay";
 
-	vdd_npu: tcs452x@1c {
-		compatible = "tcs,tcs452x";
-		reg = <0x1c>;
+	vdd_npu: fan53555@60{
+		compatible = "fcs,fan53555";
+		reg = <0x60>;
 		vin-supply = <&vcc5v0_sys>;
 		regulator-compatible = "fan53555-reg";
 		pinctrl-0 = <&vsel_gpio>;
 		vsel-gpios = <&gpio0 RK_PC6 GPIO_ACTIVE_HIGH>;
 		regulator-name = "vdd_npu";
-		regulator-min-microvolt = <750000>;
-		regulator-max-microvolt = <880000>;
-		regulator-init-microvolt = <880000>;
-		regulator-ramp-delay = <2300>;
-		fcs,suspend-voltage-selector = <1>;
-		regulator-always-on;
-		regulator-boot-on;
-		regulator-initial-state = <3>;
-		regulator-state-mem {
-			regulator-off-in-suspend;
-		};
-	};
-
-	vdd_npu_1: syr837@40 {
-		compatible = "silergy,syr827";
-		reg = <0x40>;
-		vin-supply = <&vcc5v0_sys>;
-		regulator-compatible = "fan53555-reg";
-		pinctrl-0 = <&vsel_gpio>;
-		vsel-gpios = <&gpio0 RK_PC6 GPIO_ACTIVE_HIGH>;
-		regulator-name = "vdd_npu_1";
-		regulator-min-microvolt = <750000>;
-		regulator-max-microvolt = <880000>;
-		regulator-init-microvolt = <880000>;
-		regulator-ramp-delay = <2300>;
+		regulator-min-microvolt = <800000>;
+		regulator-max-microvolt = <850000>;
+		regulator-ramp-delay = <8000>;
 		fcs,suspend-voltage-selector = <1>;
 		regulator-always-on;
 		regulator-boot-on;
@@ -136,7 +118,6 @@
 
 &npu {
 	npu-supply = <&vdd_npu>;
-	npu_1-supply = <&vdd_npu_1>;
 	status = "okay";
 };
 
